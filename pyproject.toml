@@ -27,5 +27,5 @@ line-length = 88
 target-version = "py312"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "bootcamp/tests"]
 pythonpath = ["."]
