@@ -1,0 +1,31 @@
+[project]
+name = "ai-agent-learning-15days"
+version = "0.1.0"
+description = "15 天 AI Agent、LangChain 与 LangGraph 学习环境"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "httpx[socks]",
+    "langchain",
+    "langchain-openai",
+    "langgraph",
+    "openai",
+    "pydantic",
+    "python-dotenv",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
