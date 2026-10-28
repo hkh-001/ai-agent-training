@@ -28,9 +28,10 @@
 
 from __future__ import annotations
 
+import inspect
 import types
 from collections.abc import Callable, Sequence
-from typing import Any, Literal, Union, get_args, get_origin
+from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
 # Python 类型 → JSON Schema 类型
 _PRIMITIVES: dict[Any, str] = {
@@ -58,6 +59,14 @@ class SchemaError(ValueError):
 
 def _type_schema(annotation: Any) -> dict[str, Any]:
     """把单个类型标注转成 JSON Schema 片段。"""
+    # 注意：模块里写了 `from __future__ import annotations` 时，
+    # 运行时注解会变成字符串（如 'str'）。调用方应先用 get_type_hints 解析；
+    # 走到这里的字符串说明解析失败（比如引用了未导入的名字）。
+    if isinstance(annotation, str):
+        raise SchemaError(
+            f"类型标注 {annotation!r} 是字符串且无法解析（检查名字是否已导入）"
+        )
+
     if annotation in _PRIMITIVES:
         return {"type": _PRIMITIVES[annotation]}
 
@@ -158,8 +167,6 @@ def tool_schema(
     - 统一设置 additionalProperties: False（防止模型自造参数）
     - 不支持 *args / **kwargs / tuple
     """
-    import inspect
-
     if name is None:
         name = func.__name__
 
@@ -171,6 +178,13 @@ def tool_schema(
 
     param_docs = _parse_param_docs(func.__doc__)
 
+    # 关键：用 get_type_hints 把字符串注解（future annotations）解析成真实类型。
+    # 解析失败时（比如引用了未导入的名字）退回原始注解，由 _type_schema 报错。
+    try:
+        resolved_hints = get_type_hints(func)
+    except Exception:  # noqa: BLE001 - 解析失败要让用户看到"哪个参数有问题"
+        resolved_hints = {}
+
     properties: dict[str, Any] = {}
     required: list[str] = []
 
@@ -178,10 +192,12 @@ def tool_schema(
     for param_name, param in signature.parameters.items():
         if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
             raise SchemaError(f"工具 {name} 不支持 *args / **kwargs 参数: {param_name}")
-        if param.annotation is inspect.Parameter.empty:
+
+        annotation = resolved_hints.get(param_name, param.annotation)
+        if annotation is inspect.Parameter.empty:
             raise SchemaError(f"工具 {name} 的参数 {param_name} 缺少类型标注")
 
-        schema = _type_schema(param.annotation)
+        schema = _type_schema(annotation)
 
         doc = param_docs.get(param_name)
         if not doc:

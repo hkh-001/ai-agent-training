@@ -217,3 +217,24 @@ def test_spec_from_function_roundtrip() -> None:
     assert spec.name == "get_stock"
     assert spec.parameters["required"] == ["sku"]
     assert spec.to_openai()["function"]["name"] == "get_stock"
+
+
+def test_string_annotations_are_resolved() -> None:
+    """回归测试：模块写了 from __future__ import annotations 时，
+    运行时注解决是字符串（'str'），必须先用 get_type_hints 解析。
+
+    这个 bug 在 84 个测试全绿的情况下，被一个真实脚本抓出来了
+    —— 因为测试里的工具都没用 future annotations。
+    """
+
+    def tool(x: "str") -> dict:
+        """演示字符串注解。
+
+        Args:
+            x: 参数
+        """
+        return {}
+
+    props = tool_schema(tool)["function"]["parameters"]["properties"]
+
+    assert props["x"]["type"] == "string"

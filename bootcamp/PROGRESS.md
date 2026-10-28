@@ -11,7 +11,7 @@
 | M2 | 上下文构造与不变量 | 60m | — | ⬜ | |
 | M3 | Tool Schema（签名 → JSON Schema） | 75m | 35m | ✅ 已验证 | 18 个测试过；完整实现由我提供，你做理解 + 面试题 |
 | M4 | Tool Dispatcher 与错误语义 | 70m | 90m | ✅ 已验收 | 68 passed；6 条失败路径 + retryable 语义；5 题讲评完成 |
-| M5 | Agent Loop 与轨迹 | 80m | — | ⬜ | |
+| M5 | Agent Loop 与轨迹 | 80m | 75m | ✅ 已验收 | 85 passed；四出口 + 记录器 + demo 脚本；5 题讲评完成 |
 | M6 | 最小 Harness | 55m | — | ⬜ | |
 | R1 | Day 1 代码审查 + 5 道面试题 | 40m | — | ⬜ | |
 
