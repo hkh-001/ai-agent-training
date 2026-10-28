@@ -8,3 +8,6 @@ __pycache__/
 .coverage
 htmlcov/
 
+# 运行时产物：Agent 轨迹（每次跑都会变，不纳入版本控制）
+bootcamp/data/traces/
+
