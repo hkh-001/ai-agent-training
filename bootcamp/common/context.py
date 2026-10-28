@@ -46,7 +46,7 @@ def estimate_tokens(messages: Sequence[ChatMessage]) -> int:
     usage.prompt_tokens 校准；但在**预算决策**（要不要裁剪）上，近似值足够，
     且没有依赖、跑得快。
     """
-    raise NotImplementedError("TODO(M2): 实现 estimate_tokens")
+    return sum(4 + len(m.content or "") for m in messages)
 
 
 def check_invariants(messages: Sequence[ChatMessage]) -> None:
@@ -61,7 +61,42 @@ def check_invariants(messages: Sequence[ChatMessage]) -> None:
     为什么必须查：这不是"洁癖"，是 400 的直接来源。而且一旦发生，
     错误会出现在**下一次请求**，离真正的 bug 现场很远。
     """
-    raise NotImplementedError("TODO(M2): 实现 check_invariants")
+    # pending = 欠账清单：还有哪些 tool_call_id 没收到回应
+    pending: list[str] = []
+
+    for index, msg in enumerate(messages):
+        # (a) 模型发起一批工具调用
+        if msg.role == "assistant" and msg.tool_calls:
+            if pending:
+                raise ContextError(
+                    f"messages[{index}] 之前仍有未回应的 tool_calls: {pending}"
+                )
+            pending = [call.id for call in msg.tool_calls]
+
+        # (b) 工具结果回填
+        elif msg.role == "tool":
+            if not pending:
+                raise ContextError(
+                    f"messages[{index}] 是孤儿 tool 消息: {msg.tool_call_id}"
+                )
+            if msg.tool_call_id not in pending:
+                raise ContextError(
+                    f"messages[{index}] 的 tool_call_id 对不上: "
+                    f"{msg.tool_call_id} 不在 {pending}"
+                )
+            pending.remove(msg.tool_call_id)
+
+        # (c) system / user / 无工具调用的 assistant
+        else:
+            if pending:
+                raise ContextError(
+                    f"messages[{index}] 插在 tool_calls 与结果之间，"
+                    f"仍有未回应: {pending}"
+                )
+
+    # (d) 收尾：不允许"发了调用但没人回"的账
+    if pending:
+        raise ContextError(f"有 tool_calls 未被回应: {pending}")
 
 
 def trim_history(messages: Sequence[ChatMessage], max_tokens: int) -> TrimResult:
@@ -78,4 +113,35 @@ def trim_history(messages: Sequence[ChatMessage], max_tokens: int) -> TrimResult
     返回 TrimResult(messages=保留的消息, dropped_rounds=丢了几轮,
                    estimated_tokens=裁剪后估算值)。
     """
-    raise NotImplementedError("TODO(M2): 实现 trim_history")
+    # ---------- ① 切出恒定的 system 前缀（不属于任何一轮，永不裁剪） ----------
+    prefix: list[ChatMessage] = []
+    cursor = 0
+    while cursor < len(messages) and messages[cursor].role == "system":
+        prefix.append(messages[cursor])
+        cursor += 1
+
+    # ---------- ② 按 user 边界切分成若干轮 ----------
+    # user 是"新需求"的起点：遇到它就开启新的一段，而且它自己是新段的第一条
+    rounds: list[list[ChatMessage]] = []
+    for msg in messages[cursor:]:
+        if msg.role == "user" or not rounds:
+            rounds.append([msg])
+        else:
+            rounds[-1].append(msg)
+
+    # ---------- ③ 从最老的轮开始整段丢弃，直到装得下 ----------
+    dropped = 0
+    while len(rounds) - dropped > 1:  # 至少留最后一轮
+        candidate = prefix + [m for r in rounds[dropped:] for m in r]
+        if estimate_tokens(candidate) <= max_tokens:
+            break
+        dropped += 1
+
+    # ---------- ④ 组装结果 ----------
+    kept = [m for r in rounds[dropped:] for m in r]
+    result = tuple(prefix + kept)
+    return TrimResult(
+        messages=result,
+        dropped_rounds=dropped,
+        estimated_tokens=estimate_tokens(result),
+    )

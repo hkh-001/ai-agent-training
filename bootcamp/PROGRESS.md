@@ -9,7 +9,7 @@
 |---|---|---|---|---|---|
 | M1 | 消息与工具调用数据结构 | 70m | 115m | ✅ 已验收 | `21 passed` + `ruff` 干净；审查 5 条已修复；面试题 5 题已讲评 |
 | M2 | 上下文构造与不变量 | 60m | — | ⬜ | |
-| M3 | Tool Schema（签名 → JSON Schema） | 75m | — | ⬜ | |
+| M3 | Tool Schema（签名 → JSON Schema） | 75m | 35m | ✅ 已验证 | 18 个测试过；完整实现由我提供，你做理解 + 面试题 |
 | M4 | Tool Dispatcher 与错误语义 | 70m | — | ⬜ | |
 | M5 | Agent Loop 与轨迹 | 80m | — | ⬜ | |
 | M6 | 最小 Harness | 55m | — | ⬜ | |
