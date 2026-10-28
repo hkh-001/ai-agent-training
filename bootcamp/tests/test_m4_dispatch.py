@@ -219,3 +219,26 @@ def make_enum_tool():
         return direction
 
     return move
+
+
+def test_unserializable_result_becomes_failure_not_exception() -> None:
+    """P0-2 回归：工具返回 datetime 时，dispatch 不能抛异常。"""
+    from datetime import UTC, datetime
+
+    registry = ToolRegistry()
+
+    @registry.register
+    def bad_payload(order_id: str) -> dict:
+        """返回不可 JSON 序列化的对象。
+
+        Args:
+            order_id: 订单号
+        """
+        return {"order_id": order_id, "created_at": datetime(2026, 10, 28, tzinfo=UTC)}
+
+    result = dispatch(ToolCall("c1", "bad_payload", {"order_id": "A1"}), registry)
+
+    assert result.ok is False
+    assert result.retryable is False          # 确定性错误，重试无用
+    assert "序列化" in result.error
+    assert json.loads(result.content)["ok"] is False

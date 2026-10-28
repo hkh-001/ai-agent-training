@@ -20,15 +20,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 from bootcamp.common.context import check_invariants, estimate_tokens
-from bootcamp.common.dispatch import ToolResult, dispatch_many
+from bootcamp.common.dispatch import ToolResult, dispatch
 from bootcamp.common.llm import ChatModel
 from bootcamp.common.tools import ToolRegistry
 from bootcamp.common.types import ChatMessage
+
+EventHook = Callable[[str, dict[str, Any]], None]
+
+
+def _emit(hook: EventHook | None, kind: str, **data: Any) -> None:
+    """安全地发出一个观测事件（没有钩子时是空操作）。"""
+    if hook is not None:
+        hook(kind, data)
 
 
 class StopReason(str, Enum):
@@ -68,13 +77,19 @@ def run_agent(
     messages: Sequence[ChatMessage],
     *,
     config: LoopConfig | None = None,
+    on_event: EventHook | None = None,
 ) -> AgentRun:
-    """跑一次 Agent。**保证一定终止**，并在退出时返回完整轨迹。"""
+    """跑一次 Agent。**保证一定终止**，并在退出时返回完整轨迹。
+
+    `on_event` 是可选的观测钩子（M6 的 Tracer 会挂在这里）。
+    用"钩子注入"而不是重写循环，是为了让 M5 的核心逻辑保持单一版本。
+    """
     cfg = config or LoopConfig()
     history = list(messages)
 
     # 开跑前先自检：带着坏历史进场，后面每一步都是错的
     check_invariants(history)
+    _emit(on_event, "run_start", context_tokens=estimate_tokens(history))
 
     tool_results: list[ToolResult] = []
     consecutive_errors = 0
@@ -84,32 +99,95 @@ def run_agent(
     while steps < cfg.max_steps:
         # 出口 4：上下文预算（在调用模型前检查，省一次请求）
         if estimate_tokens(history) > cfg.max_context_tokens:
-            return _finish(history, StopReason.BUDGET_EXCEEDED, steps, tool_results)
+            return _finish(history, StopReason.BUDGET_EXCEEDED, steps, tool_results, on_event)
 
+        _emit(on_event, "model_start", step=steps + 1)
         reply = model.invoke(history, tools=tools_schema)
         steps += 1
+        _emit(
+            on_event,
+            "model_end",
+            step=steps,
+            prompt_tokens=reply.usage.prompt_tokens,
+            completion_tokens=reply.usage.completion_tokens,
+            has_tool_calls=bool(reply.message.tool_calls),
+        )
         history.append(reply.message)
 
         # 出口 1：没有工具调用 = 最终答案
         if not reply.message.tool_calls:
-            return _finish(history, StopReason.FINAL, steps, tool_results)
+            return _finish(history, StopReason.FINAL, steps, tool_results, on_event)
 
-        # 行动：执行并回填（一条 call 对应一条 tool 消息）
-        for result in dispatch_many(
-            reply.message.tool_calls, registry, timeout_s=cfg.tool_timeout_s
-        ):
+        # 行动：串行执行并回填。**必须保证每个 tool_call 都有一条 tool 消息**，
+        # 否则轨迹违反协议（孤儿 tool_call → 下一次请求 400）。
+        # 所以错误预算触发后，不再执行剩余调用，但要把它们记成"已取消"结果。
+        budget_hit = False
+        for call in reply.message.tool_calls:
+            if budget_hit:
+                skipped = _cancelled_result(call)
+                tool_results.append(skipped)
+                history.append(skipped.to_message())
+                _emit(
+                    on_event,
+                    "tool_cancelled",
+                    tool_call_id=call.id,
+                    name=call.name,
+                    reason="reached_error_budget",
+                )
+                continue
+
+            _emit(on_event, "tool_start", tool_call_id=call.id, name=call.name)
+            result = dispatch(call, registry, timeout_s=cfg.tool_timeout_s)
             tool_results.append(result)
             history.append(result.to_message())
+            _emit(
+                on_event,
+                "tool_end",
+                tool_call_id=result.tool_call_id,
+                name=call.name,
+                ok=result.ok,
+                retryable=result.retryable,
+                latency_ms=round(result.latency_ms, 2),
+            )
 
             consecutive_errors = 0 if result.ok else consecutive_errors + 1
-            # 出口 3：连续失败过多，再试也是浪费预算
+            # 出口 3：连续失败过多。不要立刻 return——先把本批剩下的补成取消结果
             if consecutive_errors >= cfg.max_consecutive_tool_errors:
-                return _finish(
-                    history, StopReason.TOOL_ERROR_BUDGET, steps, tool_results
-                )
+                budget_hit = True
+
+        if budget_hit:
+            return _finish(
+                history, StopReason.TOOL_ERROR_BUDGET, steps, tool_results, on_event
+            )
 
     # 出口 2：步数用尽
-    return _finish(history, StopReason.MAX_STEPS, steps, tool_results)
+    return _finish(history, StopReason.MAX_STEPS, steps, tool_results, on_event)
+
+
+def _cancelled_result(call) -> ToolResult:
+    """为一个"没有再执行"的调用生成结构化结果。
+
+    注意语义：它**不是失败**，也**不是成功**，而是"宿主主动放弃执行"。
+    必须与真正执行过的结果区分开，否则轨迹会骗人（也骗训练数据）。
+    """
+    import json
+
+    return ToolResult(
+        tool_call_id=call.id,
+        ok=False,
+        content=json.dumps(
+            {
+                "ok": False,
+                "error": "未执行：已达到连续失败预算，本次调用被取消",
+                "retryable": False,
+                "cancelled": True,
+            },
+            ensure_ascii=False,
+        ),
+        error="未执行：已达到连续失败预算",
+        retryable=False,
+        cancelled=True,
+    )
 
 
 def _finish(
@@ -117,11 +195,14 @@ def _finish(
     reason: StopReason,
     steps: int,
     tool_results: list[ToolResult],
+    on_event: EventHook | None = None,
 ) -> AgentRun:
     """统一收尾：抽出最终答案、估算上下文，保证轨迹可直接落盘。"""
     final_answer: str | None = None
     if reason is StopReason.FINAL and history and history[-1].role == "assistant":
         final_answer = history[-1].content
+
+    _emit(on_event, "run_end", stop_reason=reason.value, steps=steps)
 
     return AgentRun(
         messages=tuple(history),

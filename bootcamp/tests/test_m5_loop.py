@@ -226,3 +226,68 @@ def test_invalid_start_history_rejected() -> None:
 
     with pytest.raises(Exception, match="tool"):
         run_agent(model, make_registry(), [user("hi"), tool_result("c9", "{}")])
+
+
+# ------------------------------------------------------- P0 回归：批量结果完整性
+
+
+def test_all_tool_calls_get_result_even_when_budget_hit() -> None:
+    """P0-1 回归：错误预算触发时，本批剩余调用也必须有一条结果。
+
+    修之前：直接 return，留下孤儿 tool_call → 轨迹违反协议 → 下一次请求 400。
+    """
+    model = MockChatModel(
+        [
+            assistant(
+                tool_calls=[
+                    ToolCall("c1", "get_stock", {}),                 # 失败（缺 sku）
+                    ToolCall("c2", "get_stock", {}),                 # 失败 → 触发预算
+                    ToolCall("c3", "get_stock", {"sku": "A1"}),      # 不该被执行
+                ]
+            )
+        ]
+    )
+
+    run = run_agent(
+        model,
+        make_registry(),
+        start(),
+        config=LoopConfig(max_steps=3, max_consecutive_tool_errors=2),
+    )
+
+    assert run.stop_reason is StopReason.TOOL_ERROR_BUDGET
+    assert len(run.tool_results) == 3                      # 三个调用都有结果
+    assert [m.role for m in run.messages].count("tool") == 3
+    check_invariants(run.messages)                         # 协议完整（关键断言）
+
+    cancelled = run.tool_results[-1]
+    assert cancelled.cancelled is True                     # 明确标记"未执行"
+    assert cancelled.ok is False
+    assert "c3" not in {r.tool_call_id for r in run.tool_results if r.ok}
+
+
+def test_cancelled_result_is_distinguishable_from_failure() -> None:
+    """取消 ≠ 失败：训练数据和评测都必须能把两者分开统计。"""
+    model = MockChatModel(
+        [
+            assistant(
+                tool_calls=[
+                    ToolCall("c1", "get_stock", {}),
+                    ToolCall("c2", "get_stock", {}),
+                    ToolCall("c3", "get_stock", {"sku": "A1"}),
+                ]
+            )
+        ]
+    )
+
+    run = run_agent(
+        model,
+        make_registry(),
+        start(),
+        config=LoopConfig(max_consecutive_tool_errors=2),
+    )
+
+    failed = [r for r in run.tool_results if not r.ok and not r.cancelled]
+    cancelled = [r for r in run.tool_results if r.cancelled]
+    assert len(failed) == 2 and len(cancelled) == 1
+    assert "cancelled" in cancelled[0].content

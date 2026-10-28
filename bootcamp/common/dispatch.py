@@ -52,6 +52,9 @@ class ToolResult:
     error: str | None = None
     retryable: bool = False
     latency_ms: float = 0.0
+    # True 表示"宿主主动没有执行"（如达到错误预算）。
+    # 它既不是成功也不是失败，必须能与两者区分，否则轨迹会骗人。
+    cancelled: bool = False
 
     def to_message(self) -> ChatMessage:
         """转成可以追加进历史的 tool 消息（id 原样带回）。"""
@@ -181,10 +184,24 @@ def dispatch(
         )
 
     # ④ 成功：序列化成字符串
+    # 注意：工具可能返回 datetime/Decimal/set 等不可序列化对象。
+    # 如果这里让 TypeError 抛出去，就违反了"dispatch 永不抛异常"的契约，
+    # 整个 Agent 会崩，而模型什么也收不到。（P0-2）
+    try:
+        content = json.dumps({"ok": True, "data": result}, ensure_ascii=False)
+    except (TypeError, ValueError) as exc:
+        return _fail(
+            call,
+            f"工具返回值无法序列化为 JSON（{type(exc).__name__}），"
+            f"这是工具实现的问题，不是你的参数问题",
+            retryable=False,
+            started=started,
+        )
+
     return ToolResult(
         tool_call_id=call.id,
         ok=True,
-        content=json.dumps({"ok": True, "data": result}, ensure_ascii=False),
+        content=content,
         latency_ms=(time.perf_counter() - started) * 1000,
     )
 
