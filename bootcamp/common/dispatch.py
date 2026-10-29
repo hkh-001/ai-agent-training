@@ -18,6 +18,7 @@ content 的稳定契约（模型据此判断下一步）::
 
 from __future__ import annotations
 
+import inspect
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -167,8 +168,17 @@ def dispatch(
         return _fail(call, problem, retryable=True, started=started)
 
     # ③ 执行（分三类异常，语义完全不同）
+    # 宿主注入：_idempotency_key 用 tool_call_id——它在"同一次调用被重试"时
+    # 保持不变，正好是幂等键的天然来源（不需要模型自己编）。
+    kwargs = dict(call.arguments)
+    host_values = {"_idempotency_key": call.id, "_tool_call_id": call.id}
+    func_params = inspect.signature(spec.func).parameters
+    for host_name, host_value in host_values.items():
+        if host_name in func_params:
+            kwargs[host_name] = host_value
+
     try:
-        result = _invoke_with_timeout(spec.func, call.arguments, timeout_s)
+        result = _invoke_with_timeout(spec.func, kwargs, timeout_s)
     except ToolBusinessError as exc:
         # 业务拒绝：预期内的结果，重试无意义，message 直接给模型看
         return _fail(call, str(exc), retryable=False, started=started)

@@ -1,0 +1,25 @@
+{
+  "skus": [
+    {
+      "sku": "A100",
+      "name": "机械键盘 K100",
+      "price_cents": 39900,
+      "on_hand": 25,
+      "reserved": 3
+    },
+    {
+      "sku": "A200",
+      "name": "人体工学鼠标 M200",
+      "price_cents": 15900,
+      "on_hand": 8,
+      "reserved": 0
+    },
+    {
+      "sku": "A900",
+      "name": "限量版手托 P900",
+      "price_cents": 9900,
+      "on_hand": 2,
+      "reserved": 0
+    }
+  ]
+}

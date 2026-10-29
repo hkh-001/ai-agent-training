@@ -192,6 +192,10 @@ def tool_schema(
     for param_name, param in signature.parameters.items():
         if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
             raise SchemaError(f"工具 {name} 不支持 *args / **kwargs 参数: {param_name}")
+        # 下划线开头的参数 = 宿主注入（如 _idempotency_key）。
+        # 它们不出现在菜单里，也不需要模型填写——由 dispatch 在执行前注入。
+        if param_name.startswith("_"):
+            continue
 
         annotation = resolved_hints.get(param_name, param.annotation)
         if annotation is inspect.Parameter.empty:
