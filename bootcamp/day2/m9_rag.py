@@ -242,6 +242,10 @@ class PolicyIndex:
             ):
                 raw.append((doc_id, index, piece))
 
+        # 过滤过短的块（例如只有一行标题）：它们几乎没有信息量，
+        # 却因为"短"而在余弦相似度里占便宜，会挤掉真正有内容的段落。
+        raw = [item for item in raw if len(item[2].strip()) >= 20]
+
         # 第二遍：算 IDF，再向量化
         weights = build_idf([_tokenize(piece) for _, _, piece in raw])
         chunks = [

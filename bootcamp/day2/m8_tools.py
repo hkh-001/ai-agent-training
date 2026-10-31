@@ -172,7 +172,7 @@ class Store:
         )
 
 
-def _as_business_error(func):
+def as_business_error(func):
     """把领域异常翻译成"业务拒绝"。
 
     为什么翻译放在工具层，而不是让 dispatch 认识 DomainError：
@@ -206,7 +206,7 @@ def register_tools(store: Store) -> ToolRegistry:
     registry = ToolRegistry()
 
     @registry.register
-    @_as_business_error
+    @as_business_error
     def get_stock(sku: str) -> dict:
         """查询某商品当前的可售库存（只读，可安全重复调用）。
 
@@ -216,7 +216,7 @@ def register_tools(store: Store) -> ToolRegistry:
         return store.check(sku)
 
     @registry.register
-    @_as_business_error
+    @as_business_error
     def reserve_stock(sku: str, qty: int, _idempotency_key: str = "") -> dict:
         """为顾客预留库存（写操作）。预留成功后该数量不再对外可售。
 
@@ -227,7 +227,7 @@ def register_tools(store: Store) -> ToolRegistry:
         return store.reserve(sku, qty, _idempotency_key)
 
     @registry.register
-    @_as_business_error
+    @as_business_error
     def release_stock(sku: str, qty: int, _idempotency_key: str = "") -> dict:
         """释放已经预留的库存（写操作，用于取消订单）。
 

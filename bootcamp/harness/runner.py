@@ -119,7 +119,9 @@ class Runner:
             error=type(exc).__name__,
         )
 
-    def run(self, messages: Sequence[ChatMessage]) -> RunResult:
+    def run(
+        self, messages: Sequence[ChatMessage], *, tool_gate=None
+    ) -> RunResult:
         configure_logging(self.config.log_level)
         self._tracer = Tracer()
         self._retries = 0
@@ -135,6 +137,7 @@ class Runner:
                 messages,
                 config=self.config.loop,
                 on_event=self._on_event,
+                tool_gate=tool_gate,
             )
         except Exception as exc:
             # 失败也要留下现场：trace 里有 run_start / model_start / run_error，

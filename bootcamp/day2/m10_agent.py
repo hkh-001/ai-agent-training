@@ -32,7 +32,7 @@ from bootcamp.common.llm import ChatModel
 from bootcamp.common.loop import AgentRun
 from bootcamp.common.tools import ToolRegistry
 from bootcamp.common.types import ChatMessage, system, user
-from bootcamp.day2.m8_tools import Store
+from bootcamp.day2.m8_tools import Store, as_business_error
 from bootcamp.day2.m9_rag import PolicyIndex
 from bootcamp.harness.runner import Runner, RunResult
 
@@ -68,11 +68,17 @@ class InventoryAgent:
     def messages(self) -> tuple[ChatMessage, ...]:
         return tuple(self._messages)
 
-    def ask(self, text: str, *, config: RunConfig | None = None) -> RunResult:
-        """问一个问题，跑一整轮 Agent（可能包含多次工具调用）。"""
+    def ask(
+        self,
+        text: str,
+        *,
+        config: RunConfig | None = None,
+        gate: Any = None,
+    ) -> RunResult:
+        """问一个问题，跑一整轮 Agent（可传审批闸门 gate.guard）。"""
         self._messages = [*self._messages, user(text)]
         runner = Runner(self.model, self.registry, config or self.config)
-        result = runner.run(self._messages)
+        result = runner.run(self._messages, tool_gate=gate)
         # 把这一轮产生的全部消息（含 tool 结果）留在历史里，支持多轮追问
         self._messages = list(result.run.messages)
         return result
@@ -86,6 +92,7 @@ def build_registry(store: Store, index: PolicyIndex) -> ToolRegistry:
     registry = ToolRegistry()
 
     @registry.register
+    @as_business_error
     def get_stock(sku: str) -> dict:
         """查询某商品当前的可售库存数量（只读，可反复调用）。
 
@@ -98,6 +105,7 @@ def build_registry(store: Store, index: PolicyIndex) -> ToolRegistry:
         return store.check(sku)
 
     @registry.register
+    @as_business_error
     def reserve_stock(sku: str, qty: int, _idempotency_key: str = "") -> dict:
         """为顾客预留库存（写操作，会减少可售数量）。
 
@@ -110,6 +118,7 @@ def build_registry(store: Store, index: PolicyIndex) -> ToolRegistry:
         return store.reserve(sku, qty, _idempotency_key)
 
     @registry.register
+    @as_business_error
     def find_policy(keyword: str, top_k: int = 3) -> dict:
         """检索售后政策条款（退换货、运费、保修、库存规则等）。
 

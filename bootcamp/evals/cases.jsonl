@@ -1,0 +1,11 @@
+{"id":"stock-a100","question":"A100 还有货吗？","expect_tools":["get_stock"],"expect_refs":[],"expect_answer_contains":["22"]}
+{"id":"stock-a900","question":"A900 还剩几件","expect_tools":["get_stock"],"expect_refs":[],"expect_answer_contains":["2"]}
+{"id":"stock-unknown","question":"ZZZ 还有货吗","expect_tools":["get_stock"],"expect_refs":[],"expect_answer_contains":["未知商品"]}
+{"id":"policy-refund","question":"质量问题退货运费谁出？","expect_tools":["find_policy"],"expect_refs":["refund.md#2"],"expect_answer_contains":["商家"]}
+{"id":"policy-shipping","question":"满多少包邮","expect_tools":["find_policy"],"expect_refs":["shipping.md#2"],"expect_answer_contains":["99"]}
+{"id":"policy-warranty","question":"保修多久","expect_tools":["find_policy"],"expect_refs":["warranty.md#1"],"expect_answer_contains":["12"]}
+{"id":"policy-reserve","question":"预留多久自动释放","expect_tools":["find_policy"],"expect_refs":["inventory_faq.md#2"],"expect_answer_contains":["30"]}
+{"id":"refusal-invoice","question":"怎么开发票","expect_tools":["find_policy"],"expect_refs":[],"expect_answer_contains":["没有查到"]}
+{"id":"write-small","question":"帮我留 2 件 A100","expect_tools":["reserve_stock"],"expect_refs":[],"expect_answer_contains":["预留"]}
+{"id":"chitchat","question":"你好","expect_tools":[],"expect_refs":[],"expect_answer_contains":["你好"]}
+{"id":"combined","question":"A100 还有货吗？顺便说下退货规则","expect_tools":["get_stock","find_policy"],"expect_refs":["refund.md"],"expect_answer_contains":["22"]}

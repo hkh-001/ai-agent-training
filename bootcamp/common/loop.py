@@ -32,6 +32,9 @@ from bootcamp.common.tools import ToolRegistry
 from bootcamp.common.types import ChatMessage
 
 EventHook = Callable[[str, dict[str, Any]], None]
+# 执行前的闸门：返回 ToolResult 表示"不要执行，用这个结果"；
+# 返回 None 表示放行。（M11 的人工审批就挂在这里。）
+ToolGate = Callable[[Any], Any]
 
 
 def _emit(hook: EventHook | None, kind: str, **data: Any) -> None:
@@ -78,6 +81,7 @@ def run_agent(
     *,
     config: LoopConfig | None = None,
     on_event: EventHook | None = None,
+    tool_gate: ToolGate | None = None,
 ) -> AgentRun:
     """跑一次 Agent。**保证一定终止**，并在退出时返回完整轨迹。
 
@@ -136,19 +140,27 @@ def run_agent(
                 )
                 continue
 
-            _emit(on_event, "tool_start", tool_call_id=call.id, name=call.name)
-            result = dispatch(call, registry, timeout_s=cfg.tool_timeout_s)
+            gated = tool_gate(call) if tool_gate is not None else None
+            if gated is not None:
+                # 闸门拦下了：不执行，直接用闸门给的结果（如"已拒绝"/"待审批"）
+                result = gated
+                _emit(on_event, "tool_gated", tool_call_id=call.id, name=call.name,
+                      ok=result.ok, cancelled=result.cancelled)
+            else:
+                _emit(on_event, "tool_start", tool_call_id=call.id, name=call.name)
+                result = dispatch(call, registry, timeout_s=cfg.tool_timeout_s)
             tool_results.append(result)
             history.append(result.to_message())
-            _emit(
-                on_event,
-                "tool_end",
-                tool_call_id=result.tool_call_id,
-                name=call.name,
-                ok=result.ok,
-                retryable=result.retryable,
-                latency_ms=round(result.latency_ms, 2),
-            )
+            if gated is None:
+                _emit(
+                    on_event,
+                    "tool_end",
+                    tool_call_id=result.tool_call_id,
+                    name=call.name,
+                    ok=result.ok,
+                    retryable=result.retryable,
+                    latency_ms=round(result.latency_ms, 2),
+                )
 
             consecutive_errors = 0 if result.ok else consecutive_errors + 1
             # 出口 3：连续失败过多。不要立刻 return——先把本批剩下的补成取消结果
